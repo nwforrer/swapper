@@ -1,0 +1,19 @@
+* Swapper
+
+You are a forest spirit that has been spurned by the creatures you protect. It's time for revenge.
+
+** Core mechanics
+
+You start the game with the ability to take over an enemies body. When you do, you gain their abilities and attributes. 
+You retain your ability to take over bodies, and when using this while inside another body, you will swap bodies. Your old body will then become another enemy.
+You can only maintain control of a body for a limited number of turns. The more powerful the body, the fewer number of turns you can control it. 
+When you've lost control of the body, you are banished to the spirit realm and must begin again.
+
+Turn based.
+Eight directional movement.
+Keyboard and mouse based movement.
+
+** Display
+
+ASCII 
+
