@@ -23,16 +23,16 @@
 
 (defn init-sounds [state]
   (let [sound (js/Howl. (clj->js {:src ["sound/Subterranians.mp3"]
-                                  ;:autoplay true
+                                  :autoplay true
                                   }))]
     (assoc state :music sound)))
 
 (defn init-player [state]
   (let [player (e/create-entity)]
     (-> state
-        (e/add-component player (Controlled.))
-        (e/add-component player (Position. 50 50))
-        (e/add-component player (Visible. "@" "#FF0000")))))
+        (e/add-component player (->Controlled))
+        (e/add-component player (->Position (atom 50) (atom 50)))
+        (e/add-component player (->Visible "@" "#FF0000")))))
 
 (defn render [state]
   (let [ctx (get-in state [:renderer :ctx])
@@ -42,32 +42,32 @@
     (set! (.-font ctx) "23px courier, inconsolata, monospace")
     (set! (.-textBaseline ctx) "top")
     (doseq [entity (e/get-all-entities-with-component state Visible)]
-      (let [glyph (e/get-component state entity Visible)
-            position (e/get-component state entity Position)]
+      (let* [glyph (e/get-component state entity Visible)
+             position (e/get-component state entity Position)
+             x (:x position)
+             y (:y position)]
         (set! (.-fillStyle ctx) (:color glyph))
-        (.fillText ctx (:char glyph) (:x position) (:y position)))))
+        (.fillText ctx (:char glyph) @x @y))))
   state)
 
-(defn move-position [state entity delta]
-  (e/update-component state entity Position
-                      (fn [component delta]
-                        (-> component
-                            (assoc :x (+ (:x component) (:x delta)))
-                            (assoc :y (+ (:y component) (:y delta)))))
-                      delta))
+(defn move-position! [state entity delta]
+  (let* [position (e/get-component state entity Position)
+         x (:x position)
+         y (:y position)]
+    (swap! x + (:x delta))
+    (swap! y + (:y delta))))
 
 (defn handle-input [state]
-  (let [new-state (atom state)]
-    (doseq [entity (e/get-all-entities-with-component state Controlled)]
-      (if (get @*key-state* 37)
-        (reset! new-state (move-position state entity {:x -1 :y 0})))
-      (if (get @*key-state* 39)
-        (reset! new-state (move-position state entity {:x 1 :y 0})))
-      (if (get @*key-state* 40)
-        (reset! new-state (move-position state entity {:x 0 :y 1})))
-      (if (get @*key-state* 38)
-        (reset! new-state (move-position state entity {:x 0 :y -1}))))
-    @new-state))
+  (doseq [entity (e/get-all-entities-with-component state Controlled)]
+    (if (get @*key-state* 37)
+      (move-position! state entity {:x -1 :y 0}))
+    (if (get @*key-state* 39)
+      (move-position! state entity {:x 1 :y 0}))
+    (if (get @*key-state* 40)
+      (move-position! state entity {:x 0 :y 1}))
+    (if (get @*key-state* 38)
+      (move-position! state entity {:x 0 :y -1})))
+  state)
 
 (defn keydown [event]
   (swap! *key-state* assoc (.-keyCode event) true))
@@ -97,6 +97,7 @@
   (set! (.-onkeyup js/document) keyup))
 
 (set! (.-onload js/window) startup)
+
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
