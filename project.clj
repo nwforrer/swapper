@@ -12,6 +12,7 @@
                  [org.clojure/clojurescript "1.10.238"]
                  [org.clojure/core.async  "0.4.474"]
                  [cljsjs/howler "2.0.5-0"]
+                 [com.andrewmcveigh/cljs-time "0.5.2"]
                  [brute "0.4.0"]]
 
   :plugins [[lein-figwheel "0.5.16"]
