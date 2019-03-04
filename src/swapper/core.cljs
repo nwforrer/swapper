@@ -15,11 +15,14 @@
 
 (defrecord Name [name])
 (defrecord Position [x y])
-(defrecord Visible [char color])
+(defrecord Visible [char base-color color])
 (defrecord Controlled [input-state])
 (defrecord LastActionTimer [delay last-time])
 (defrecord Health [health max-health])
+(defrecord AbilitiesState [state])
 (defrecord SwapAttack [])
+(defrecord MeleeAttack [damage])
+(defrecord AbilitiesToSteal [abilities])
 
 (defrecord Tile [char blocks])
 (defrecord GameMap [tiles])
@@ -81,8 +84,9 @@
         (e/add-component player (->LastActionTimer 200 0))
         (e/add-component player (->Position 10 10))
         (e/add-component player (->Health 3 3))
+        (e/add-component player (->AbilitiesState :none))
         (e/add-component player (->Name "Player"))
-        (e/add-component player (->Visible "@" "#FF0000"))
+        (e/add-component player (->Visible "@" "#FF0000" "#FF0000"))
         (e/add-component player (->SwapAttack)))))
 
 (defn init-enemy [state name char color x y]
@@ -91,7 +95,9 @@
         (e/add-component enemy (->Position x y))
         (e/add-component enemy (->Name name))
         (e/add-component enemy (->Health 2 2))
-        (e/add-component enemy (->Visible char color)))))
+        (e/add-component enemy (->MeleeAttack 1))
+        (e/add-component enemy (->AbilitiesToSteal [MeleeAttack]))
+        (e/add-component enemy (->Visible char color color)))))
 
 (defn init-map [state]
   (let [tiles (vec (repeat map-size (vec (repeat map-size (->Tile "#" true)))))]
@@ -138,9 +144,10 @@
         (.fillText ctx (:char glyph) x y))))
   state)
 
-(defn initiate-swap [state entity]
+(defn set-abilities-state [state entity new-state]
+  (println "set abilities state" new-state)
   (let [controlled (e/get-component state entity Controlled)]
-    (replace-component state entity Controlled #(assoc % :input-state :swap))))
+    (replace-component state entity AbilitiesState #(assoc % :state new-state))))
 
 (defn move-position [state entity delta]
   (let* [position (e/get-component state entity Position)
@@ -152,14 +159,16 @@
 
 (defn attack [state attacker defender]
   (let [attacker-name (e/get-component state attacker Name)
-        defender-name (e/get-component state defender Name)]
-    (println (:name attacker-name) "attacks" (:name defender-name))
+        defender-name (e/get-component state defender Name)
+        attack (e/get-component state attacker MeleeAttack)]
+    (println (:name attacker-name) "attacks" (:name defender-name) "for" (:damage attack) "damage")
     (as-> state state
-      (replace-component state defender Health (fn [health] (assoc health :health (dec (:health health)))))
+      (replace-component state defender Health (fn [health] (assoc health :health
+                                                                   (- (:health health) (:damage attack)))))
         
       (let [defender-health (e/get-component state defender Health)]
         (cond
-          (= (:health defender-health) 0)
+          (<= (:health defender-health) 0)
           (do
             (println (:name defender-name) "has died.")
             (e/kill-entity state defender))
@@ -169,10 +178,22 @@
             (println "remaining health:" (:health defender-health))
             state))))))
 
+(defn swap [state initiator target]
+  (let [abilities (e/get-component state target AbilitiesToSteal)
+        new-state (atom state)]
+    (println "swapping" abilities "abilities from" target)
+    (doseq [ability-component (:abilities abilities)]
+      (let [ability (e/get-component @new-state target ability-component)]
+        (reset! new-state (-> @new-state
+                              (remove-component target ability)
+                              (e/add-component initiator ability)))))
+    @new-state))
+
 (defn move-or-attack [state entity delta]
   (let* [position (e/get-component state entity Position)
          dest-x (+ (:x position) (:x delta))
          dest-y (+ (:y position) (:y delta))
+         abilities-state (e/get-component state entity AbilitiesState)
          attack-entity (atom nil)
          can-move? (atom true)]
     (doseq [other-entity (get-entities-at-pos state {:x dest-x :y dest-y})]
@@ -190,7 +211,9 @@
 
     (cond
       @attack-entity
-      (attack state entity @attack-entity)
+      (if (= (:state abilities-state) :swap)
+        (swap state entity @attack-entity)
+        (attack state entity @attack-entity))
       
       @can-move?
       (move-position state entity delta)
@@ -200,14 +223,18 @@
 
 (defn default-input [state entity]
   (let [new-state (atom state)]
-    (let [last-action-timer (e/get-component state entity LastActionTimer)]
+    (let [last-action-timer (e/get-component state entity LastActionTimer)
+          abilities-state (e/get-component state entity AbilitiesState)]
       (when (>= (- (dtc/to-long (dt/now)) (:last-time last-action-timer)) (:delay last-action-timer))
         (reset! new-state (replace-component state entity LastActionTimer
                                              (fn [last-action-timer]
                                                (assoc last-action-timer :last-time (dtc/to-long (dt/now))))))
         (cond
           (get @*key-state* 83)
-          (reset! new-state (initiate-swap @new-state entity))
+          (reset! new-state
+                  (if (= (:state abilities-state) :swap)
+                    (set-abilities-state @new-state entity :none)
+                    (set-abilities-state @new-state entity :swap)))
           
           (get @*key-state* 37)
           (reset! new-state (move-or-attack @new-state entity {:x -1 :y 0}))
@@ -264,7 +291,8 @@
                    (init-sounds)
                    (init-map)
                    (init-player)
-                   (init-enemy "Kobold" "k" "#00FF00" 7 7))
+                   (init-enemy "Kobold" "k" "#00FF00" 7 7)
+                   (init-enemy "Goblin" "g" "#0000FF" 11 13))
          canvas (get-in state [:renderer :canvas])]
     (game-loop state 0)
     (.addEventListener canvas "click" click-event))
