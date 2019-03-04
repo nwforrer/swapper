@@ -9,18 +9,53 @@
 (defonce *state* (atom nil))
 (defonce *key-state* (atom nil))
 
-(def tile-size 25)
+(def tile-width 16)
+(def tile-height 25)
 (def map-size 40)
 
 (defrecord Name [name])
 (defrecord Position [x y])
 (defrecord Visible [char color])
-(defrecord Controlled [])
+(defrecord Controlled [input-state])
 (defrecord LastActionTimer [delay last-time])
 (defrecord Health [health max-health])
+(defrecord SwapAttack [])
 
 (defrecord Tile [char blocks])
 (defrecord GameMap [tiles])
+
+(defn remove-component [system entity instance]
+  (let [type (e/get-component-type instance)
+        system (transient system)
+        entity-components (:entity-components system)
+        entity-component-types (:entity-component-types system)]
+    (-> system
+        (assoc! :entity-components (assoc entity-components type (-> entity-components (get type) (dissoc entity))))
+        (assoc! :entity-component-types (assoc entity-component-types entity (as-> entity-component-types types (get types entity) (remove #{type} types))))
+        persistent!)))
+
+(defn replace-component [state entity type fn & args]
+  (if-let [update (apply fn (e/get-component state entity type) args)]
+    (let [old-component (e/get-component state entity type)]
+      (-> state
+          (remove-component entity old-component)
+          (e/add-component entity update)))))
+
+(defn get-tile-pos-from-pixel [pixel-pos]
+  (hash-map :x (.floor js/Math (/ (:x pixel-pos) tile-width))
+            :y (.floor js/Math (/ (:y pixel-pos) tile-height))))
+
+(defn get-cursor-pos [canvas event]
+  (let [rect (.getBoundingClientRect canvas)
+        x (- (.-clientX event) (.-left rect))
+        y (- (.-clientY event) (.-top rect))]
+    (hash-map :x x :y y)))
+
+(defn get-entities-at-pos [state pos]
+  (filter (fn [entity]
+            (let [position (e/get-component state entity Position)]
+              (and (= (:x position) (:x pos)) (= (:y position) (:y pos)))))
+          (e/get-all-entities-with-component state Visible)))
 
 (defn init-ecs [state]
   (e/create-system))
@@ -42,19 +77,20 @@
 (defn init-player [state]
   (let [player (e/create-entity)]
     (-> state
-        (e/add-component player (->Controlled))
-        (e/add-component player (->LastActionTimer 200 (atom 0)))
-        (e/add-component player (->Position (atom 10) (atom 10)))
-        (e/add-component player (->Health (atom 3) (atom 3)))
+        (e/add-component player (->Controlled :normal))
+        (e/add-component player (->LastActionTimer 200 0))
+        (e/add-component player (->Position 10 10))
+        (e/add-component player (->Health 3 3))
         (e/add-component player (->Name "Player"))
-        (e/add-component player (->Visible "@" "#FF0000")))))
+        (e/add-component player (->Visible "@" "#FF0000"))
+        (e/add-component player (->SwapAttack)))))
 
 (defn init-enemy [state name char color x y]
   (let [enemy (e/create-entity)]
     (-> state
-        (e/add-component enemy (->Position (atom x) (atom y)))
+        (e/add-component enemy (->Position x y))
         (e/add-component enemy (->Name name))
-        (e/add-component enemy (->Health (atom 2) (atom 2)))
+        (e/add-component enemy (->Health 2 2))
         (e/add-component enemy (->Visible char color)))))
 
 (defn init-map [state]
@@ -83,8 +119,8 @@
             x (range map-size)]
       (let [tiles (get-in state [:game-map :tiles])
             tile (get-in tiles [y x])
-            x-pos (* x tile-size)
-            y-pos (* y tile-size)]
+            x-pos (* x tile-width)
+            y-pos (* y tile-height)]
         (.fillText ctx (:char tile) x-pos y-pos))))
   state)
 
@@ -94,51 +130,56 @@
     (doseq [entity (e/get-all-entities-with-component state Visible)]
       (let* [glyph (e/get-component state entity Visible)
              position (e/get-component state entity Position)
-             x (* @(:x position) tile-size)
-             y (* @(:y position) tile-size)]
+             x (* (:x position) tile-width)
+             y (* (:y position) tile-height)]
         (set! (.-fillStyle ctx) "#000")
-        (.fillRect ctx x y tile-size tile-size)
+        (.fillRect ctx x y tile-width tile-height)
         (set! (.-fillStyle ctx) (:color glyph))
         (.fillText ctx (:char glyph) x y))))
   state)
 
-(defn move-position! [state entity delta]
+(defn initiate-swap [state entity]
+  (let [controlled (e/get-component state entity Controlled)]
+    (replace-component state entity Controlled #(assoc % :input-state :swap))))
+
+(defn move-position [state entity delta]
   (let* [position (e/get-component state entity Position)
          x (:x position)
          y (:y position)]
-    (swap! x + (:x delta))
-    (swap! y + (:y delta)))
-  state)
+    (replace-component state entity Position
+                       (fn [position & args]
+                         (-> position (assoc :x (+ x (:x delta))) (assoc :y (+ y (:y delta))))))))
 
-(defn attack! [state attacker defender]
-  (let [defender-health (e/get-component state defender Health)
-        attacker-name (e/get-component state attacker Name)
+(defn attack [state attacker defender]
+  (let [attacker-name (e/get-component state attacker Name)
         defender-name (e/get-component state defender Name)]
-    (swap! (:health defender-health) dec)
     (println (:name attacker-name) "attacks" (:name defender-name))
-    (cond
-      (= @(:health defender-health) 0)
-      (do
-        (println (:name defender-name) "has died.")
-        (e/kill-entity state defender))
-
-      :else
-      (do
-        (println "remaining health:" @(:health defender-health))
-        state))))
+    (as-> state state
+      (replace-component state defender Health (fn [health] (assoc health :health (dec (:health health)))))
+        
+      (let [defender-health (e/get-component state defender Health)]
+        (cond
+          (= (:health defender-health) 0)
+          (do
+            (println (:name defender-name) "has died.")
+            (e/kill-entity state defender))
+          
+          :else
+          (do
+            (println "remaining health:" (:health defender-health))
+            state))))))
 
 (defn move-or-attack [state entity delta]
   (let* [position (e/get-component state entity Position)
-         dest-x (+ @(:x position) (:x delta))
-         dest-y (+ @(:y position) (:y delta))
+         dest-x (+ (:x position) (:x delta))
+         dest-y (+ (:y position) (:y delta))
          attack-entity (atom nil)
          can-move? (atom true)]
-    (doseq [other-entity (e/get-all-entities-with-component state Visible)]
+    (doseq [other-entity (get-entities-at-pos state {:x dest-x :y dest-y})]
       (when (not= other-entity entity)
         (let [other-pos (e/get-component state other-entity Position)]
-          (when (and (= @(:x other-pos) dest-x) (= @(:y other-pos) dest-y))
-            (reset! can-move? false)
-            (reset! attack-entity other-entity)))))
+          (reset! can-move? false)
+          (reset! attack-entity other-entity))))
 
     ;; if we didn't collide with an entity, check for collisions on map
     (when (nil? @attack-entity)
@@ -149,32 +190,49 @@
 
     (cond
       @attack-entity
-      (attack! state entity @attack-entity)
+      (attack state entity @attack-entity)
       
       @can-move?
-      (move-position! state entity delta)
+      (move-position state entity delta)
 
       :else
       state)))
 
+(defn default-input [state entity]
+  (let [new-state (atom state)]
+    (let [last-action-timer (e/get-component state entity LastActionTimer)]
+      (when (>= (- (dtc/to-long (dt/now)) (:last-time last-action-timer)) (:delay last-action-timer))
+        (reset! new-state (replace-component state entity LastActionTimer
+                                             (fn [last-action-timer]
+                                               (assoc last-action-timer :last-time (dtc/to-long (dt/now))))))
+        (cond
+          (get @*key-state* 83)
+          (reset! new-state (initiate-swap @new-state entity))
+          
+          (get @*key-state* 37)
+          (reset! new-state (move-or-attack @new-state entity {:x -1 :y 0}))
+
+          (get @*key-state* 39)
+          (reset! new-state (move-or-attack @new-state entity {:x 1 :y 0}))
+
+          (get @*key-state* 40)
+          (reset! new-state (move-or-attack @new-state entity {:x 0 :y 1}))
+
+          (get @*key-state* 38)
+          (reset! new-state (move-or-attack @new-state entity {:x 0 :y -1})))))
+    @new-state))
+
+(defn swap-input [state entity]
+  state)
+
 (defn handle-input [state]
   (let [new-state (atom state)]
     (doseq [entity (e/get-all-entities-with-component state Controlled)]
-      (let [last-action-timer (e/get-component state entity LastActionTimer)]
-        (when (> (- (dtc/to-long (dt/now)) @(:last-time last-action-timer)) (:delay last-action-timer))
-          (reset! (:last-time last-action-timer) (dtc/to-long (dt/now)))
-          (cond
-            (get @*key-state* 37)
-            (reset! new-state (move-or-attack state entity {:x -1 :y 0}))
+      (let [controlled (e/get-component state entity Controlled)]
+        (case (:input-state controlled)
+          :normal (reset! new-state (default-input state entity))
 
-            (get @*key-state* 39)
-            (reset! new-state (move-or-attack state entity {:x 1 :y 0}))
-
-            (get @*key-state* 40)
-            (reset! new-state (move-or-attack state entity {:x 0 :y 1}))
-
-            (get @*key-state* 38)
-            (reset! new-state (move-or-attack state entity {:x 0 :y -1}))))))
+          :swap (reset! new-state (swap-input state entity)))))
     @new-state))
 
 (defn keydown [event]
@@ -183,6 +241,9 @@
 (defn keyup [event]
   (swap! *key-state* dissoc (.-keyCode event)))
 
+(defn click-event [event]
+  (println "clicked" ))
+
 (defn update-game [state]
   (-> state
       (handle-input)
@@ -190,26 +251,27 @@
       (render-map)
       (render-entities)))
 
-(defn game-loop [state]
+(defn game-loop [state timestamp]
   (as-> state state
     (update-game state)
     (reset! *state* state)
-    (.requestAnimationFrame js/window #(game-loop state))))
+    (.requestAnimationFrame js/window #(game-loop state %))))
 
 (defn startup []
-  (-> {}
-      (init-ecs)
-      (init-render-context)
-      (init-sounds)
-      (init-map)
-      (init-player)
-      (init-enemy "Kobold" "k" "#00FF00" 7 7)
-      (game-loop))
+  (let* [state (-> {}
+                   (init-ecs)
+                   (init-render-context)
+                   (init-sounds)
+                   (init-map)
+                   (init-player)
+                   (init-enemy "Kobold" "k" "#00FF00" 7 7))
+         canvas (get-in state [:renderer :canvas])]
+    (game-loop state 0)
+    (.addEventListener canvas "click" click-event))
   (set! (.-onkeydown js/document) keydown)
   (set! (.-onkeyup js/document) keyup))
 
 (set! (.-onload js/window) startup)
-
 
 (defn on-js-reload []
   ;; optionally touch your app-state to force rerendering depending on
