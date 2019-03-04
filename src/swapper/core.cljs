@@ -67,6 +67,7 @@
   (let* [canvas (.getElementById js/document "game-canvas")
          ctx (.getContext canvas "2d")]
     (set! (.-font ctx) "25px courier, inconsolata, monospace")
+    (set! (.-tabIndex canvas) 1)
     (-> state
         (assoc-in [:renderer :ctx] ctx)
         (assoc-in [:renderer :canvas] canvas))))
@@ -263,7 +264,8 @@
     @new-state))
 
 (defn keydown [event]
-  (swap! *key-state* assoc (.-keyCode event) true))
+  (swap! *key-state* assoc (.-keyCode event) true)
+  (.preventDefault event))
 
 (defn keyup [event]
   (swap! *key-state* dissoc (.-keyCode event)))
