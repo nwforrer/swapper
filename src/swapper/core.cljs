@@ -8,6 +8,7 @@
 
 (defonce *state* (atom nil))
 (defonce *key-state* (atom nil))
+(defonce *input-queue* (atom {}))
 
 (def tile-width 16)
 (def tile-height 25)
@@ -82,7 +83,7 @@
   (let [player (e/create-entity)]
     (-> state
         (e/add-component player (->Controlled :normal))
-        (e/add-component player (->LastActionTimer 200 0))
+        (e/add-component player (->LastActionTimer 100 0))
         (e/add-component player (->Position 10 10))
         (e/add-component player (->Health 3 3))
         (e/add-component player (->AbilitiesState :none))
@@ -222,6 +223,29 @@
       :else
       state)))
 
+(defn process-input-queue-actions [state entity abilities-state]
+  (let [new-state (atom state)]
+    (cond
+      (= (get @*input-queue* 83) :down)
+      (reset! new-state
+              (if (= (:state abilities-state) :swap)
+                (set-abilities-state @new-state entity :none)
+                (set-abilities-state @new-state entity :swap)))
+      
+      (= (get @*input-queue* 37) :down)
+      (reset! new-state (move-or-attack @new-state entity {:x -1 :y 0}))
+
+      (= (get @*input-queue* 39) :down)
+      (reset! new-state (move-or-attack @new-state entity {:x 1 :y 0}))
+
+      (= (get @*input-queue* 40) :down)
+      (reset! new-state (move-or-attack @new-state entity {:x 0 :y 1}))
+
+      (= (get @*input-queue* 38) :down)
+      (reset! new-state (move-or-attack @new-state entity {:x 0 :y -1})))
+
+    @new-state))
+
 (defn default-input [state entity]
   (let [new-state (atom state)]
     (let [last-action-timer (e/get-component state entity LastActionTimer)
@@ -247,7 +271,11 @@
           (reset! new-state (move-or-attack @new-state entity {:x 0 :y 1}))
 
           (get @*key-state* 38)
-          (reset! new-state (move-or-attack @new-state entity {:x 0 :y -1})))))
+          (reset! new-state (move-or-attack @new-state entity {:x 0 :y -1}))
+
+          :else
+          (reset! new-state (process-input-queue-actions @new-state entity abilities-state)))
+        (reset! *input-queue* {})))
     @new-state))
 
 (defn swap-input [state entity]
@@ -265,6 +293,7 @@
 
 (defn keydown [event]
   (swap! *key-state* assoc (.-keyCode event) true)
+  (swap! *input-queue* assoc (.-keyCode event) :down)
   (.preventDefault event))
 
 (defn keyup [event]
