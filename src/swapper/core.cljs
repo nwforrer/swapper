@@ -2,7 +2,8 @@
   (:require [brute.entity :as e]
             [cljsjs.howler]
             [cljs-time.core :as dt]
-            [cljs-time.coerce :as dtc]))
+            [cljs-time.coerce :as dtc]
+            [swapper.dungeon :as dungeon]))
 
 (enable-console-print!)
 
@@ -10,9 +11,8 @@
 (defonce *key-state* (atom nil))
 (defonce *input-queue* (atom {}))
 
-(def tile-width 16)
-(def tile-height 25)
-(def map-size 40)
+(defonce *tile-width* (atom nil))
+(def tile-height 10)
 
 (defrecord Name [name])
 (defrecord Position [x y])
@@ -24,9 +24,6 @@
 (defrecord SwapAttack [])
 (defrecord MeleeAttack [damage])
 (defrecord AbilitiesToSteal [abilities])
-
-(defrecord Tile [char blocks])
-(defrecord GameMap [tiles])
 
 (defn remove-component [system entity instance]
   (let [type (e/get-component-type instance)
@@ -46,7 +43,7 @@
           (e/add-component entity update)))))
 
 (defn get-tile-pos-from-pixel [pixel-pos]
-  (hash-map :x (.floor js/Math (/ (:x pixel-pos) tile-width))
+  (hash-map :x (.floor js/Math (/ (:x pixel-pos) @*tile-width*))
             :y (.floor js/Math (/ (:y pixel-pos) tile-height))))
 
 (defn get-cursor-pos [canvas event]
@@ -67,8 +64,9 @@
 (defn init-render-context [state]
   (let* [canvas (.getElementById js/document "game-canvas")
          ctx (.getContext canvas "2d")]
-    (set! (.-font ctx) "25px courier, inconsolata, monospace")
+    (set! (.-font ctx) (str tile-height "px courier, inconsolata, monospace"))
     (set! (.-tabIndex canvas) 1)
+    (reset! *tile-width* (.ceil js/Math (.-width (.measureText ctx "m"))))
     (-> state
         (assoc-in [:renderer :ctx] ctx)
         (assoc-in [:renderer :canvas] canvas))))
@@ -101,18 +99,6 @@
         (e/add-component enemy (->AbilitiesToSteal [MeleeAttack]))
         (e/add-component enemy (->Visible char color color)))))
 
-(defn init-map [state]
-  (let [tiles (vec (repeat map-size (vec (repeat map-size (->Tile "#" true)))))]
-    (as-> tiles tiles
-      (reduce (fn [acc y]
-                (reduce (fn [acc x]
-                          (assoc-in acc [y x] (->Tile "." false)))
-                        acc
-                        (range 5 15)))
-              tiles
-              (range 5 15))
-      (assoc state :game-map (->GameMap tiles)))))
-
 (defn clear-screen [state]
   (let [ctx (get-in state [:renderer :ctx])
         canvas (get-in state [:renderer :canvas])]
@@ -123,11 +109,11 @@
 (defn render-map [state]
   (let [ctx (get-in state [:renderer :ctx])]
     (set! (.-fillStyle ctx) "#333333")
-    (doseq [y (range map-size)
-            x (range map-size)]
+    (doseq [y (range dungeon/map-size)
+            x (range dungeon/map-size)]
       (let [tiles (get-in state [:game-map :tiles])
             tile (get-in tiles [y x])
-            x-pos (* x tile-width)
+            x-pos (* x @*tile-width*)
             y-pos (* y tile-height)]
         (.fillText ctx (:char tile) x-pos y-pos))))
   state)
@@ -138,10 +124,10 @@
     (doseq [entity (e/get-all-entities-with-component state Visible)]
       (let* [glyph (e/get-component state entity Visible)
              position (e/get-component state entity Position)
-             x (* (:x position) tile-width)
+             x (* (:x position) @*tile-width*)
              y (* (:y position) tile-height)]
         (set! (.-fillStyle ctx) "#000")
-        (.fillRect ctx x y tile-width tile-height)
+        (.fillRect ctx x y @*tile-width* tile-height)
         (set! (.-fillStyle ctx) (:color glyph))
         (.fillText ctx (:char glyph) x y))))
   state)
@@ -320,7 +306,7 @@
                    (init-ecs)
                    (init-render-context)
                    (init-sounds)
-                   (init-map)
+                   (dungeon/init-map)
                    (init-player)
                    (init-enemy "Kobold" "k" "#00FF00" 7 7)
                    (init-enemy "Goblin" "g" "#0000FF" 11 13))
