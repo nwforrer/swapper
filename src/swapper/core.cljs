@@ -12,7 +12,7 @@
 (defonce *input-queue* (atom {}))
 
 (defonce *tile-width* (atom nil))
-(def tile-height 10)
+(def tile-height 8)
 
 (defrecord Name [name])
 (defrecord Position [x y])
@@ -108,13 +108,13 @@
 
 (defn render-map [state]
   (let [ctx (get-in state [:renderer :ctx])]
-    (set! (.-fillStyle ctx) "#333333")
-    (doseq [y (range dungeon/map-size)
-            x (range dungeon/map-size)]
+    (doseq [y (range dungeon/map-height)
+            x (range dungeon/map-width)]
       (let [tiles (get-in state [:game-map :tiles])
             tile (get-in tiles [y x])
             x-pos (* x @*tile-width*)
             y-pos (* y tile-height)]
+        (set! (.-fillStyle ctx) (:color tile))
         (.fillText ctx (:char tile) x-pos y-pos))))
   state)
 
