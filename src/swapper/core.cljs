@@ -12,7 +12,7 @@
 (defonce *input-queue* (atom {}))
 
 (defonce *tile-width* (atom nil))
-(def tile-height 8)
+(def tile-height 14)
 
 (defrecord Name [name])
 (defrecord Position [x y])

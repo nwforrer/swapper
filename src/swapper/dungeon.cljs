@@ -46,8 +46,7 @@
 (defn carve [dungeon {x :x y :y} region-index]
   (as-> dungeon dungeon
     (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333"))
-    (assoc-in dungeon [:region-vec region-index]
-              (conj (get-in dungeon [:region-vec region-index]) {:x x :y x}))))
+    (assoc-in dungeon [:region-vec {:x x :y y}] region-index)))
 
 (defn- carve-room [dungeon rect region-index]
   (reduce (fn [acc y]
@@ -128,10 +127,43 @@
             dungeon
             range-y)))
 
+(defn adjacent-different-regions [{:keys [tiles region-vec]} cell]
+  (let [empty-dirs (remove #(get-in tiles [(:y (add-pos cell %)) (:x (add-pos cell %)) :blocks])
+                           cardinal-dirs)]
+    (set (map (fn [dir]
+                (get region-vec (add-pos cell dir)))
+              empty-dirs))))
+
+(defn get-connectors [dungeon]
+  (let [range-x (range 1 (dec map-width))
+        range-y (range 1 (dec map-height))]
+    (reduce (fn [dungeon y]
+              (reduce (fn [dungeon x]
+                        (if (and (get-in dungeon [:tiles y x :blocks])
+                                 (> (count (adjacent-different-regions dungeon {:x x :y y})) 1))
+                          (assoc dungeon :connectors (conj (:connectors dungeon) {:x x :y y}))
+                          dungeon))
+                      dungeon
+                      range-x))
+            dungeon
+            range-y)))
+
+(defn connect-regions [dungeon]
+  (let [connectors (:connectors (get-connectors dungeon))]
+    (reduce (fn [dungeon {:keys [x y]}]
+              (assoc-in dungeon [:tiles y x] (->Tile "!" true "#FF0000")))
+            dungeon
+            connectors)))
+
 (defn init-map [state]
-  (let [dungeon (-> (hash-map :region-index -1 :region-vec {} :rooms [] :tiles (all-walls map-width map-height))
+  (let [dungeon (-> (hash-map :connectors [] :region-index -1 :region-vec {} :rooms [] :tiles (all-walls map-width map-height))
                     (place-rooms)
-                    (generate-maze))]
+                    (generate-maze)
+                    (connect-regions)
+                    )]
     (-> state
         (assoc :game-map (->GameMap (:tiles dungeon)))
+        (assoc :region-vec (:region-vec dungeon))
+        (assoc :connectors (:connectors dungeon))
+        (assoc :dungeon dungeon)
         (assoc :rooms (:rooms dungeon)))))
