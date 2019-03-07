@@ -44,7 +44,10 @@
     room))
 
 (defn carve [dungeon {x :x y :y} region-index]
-  (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333")))
+  (as-> dungeon dungeon
+    (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333"))
+    (assoc-in dungeon [:region-vec region-index]
+              (conj (get-in dungeon [:region-vec region-index]) {:x x :y x}))))
 
 (defn- carve-room [dungeon rect region-index]
   (reduce (fn [acc y]
@@ -126,10 +129,9 @@
             range-y)))
 
 (defn init-map [state]
-  (let [dungeon (-> (hash-map :region-index -1 :region-vec [] :rooms [] :tiles (all-walls map-width map-height))
+  (let [dungeon (-> (hash-map :region-index -1 :region-vec {} :rooms [] :tiles (all-walls map-width map-height))
                     (place-rooms)
                     (generate-maze))]
     (-> state
         (assoc :game-map (->GameMap (:tiles dungeon)))
-        (assoc :rooms (:rooms dungeon))
-        (assoc :region-index (:region-index dungeon)))))
+        (assoc :rooms (:rooms dungeon)))))
