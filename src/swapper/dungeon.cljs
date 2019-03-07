@@ -30,7 +30,7 @@
     (= (count overlapping) 0)))
 
 (defn- all-walls [width height]
-  (vec (repeat height (vec (repeat width (->Tile "#" true "#333333"))))))
+  (vec (repeat height (vec (repeat width (->Tile "#" true "#777777"))))))
 
 (defn- generate-random-room []
   (let [size (inc (* (inc (rand-int 10)) 2))
@@ -43,37 +43,45 @@
         room (->Rect pos-x pos-y (+ pos-x width) (+ pos-y height))]
     room))
 
-(defn- carve-room [tiles rect]
+(defn carve [dungeon {x :x y :y} region-index]
+  (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333")))
+
+(defn- carve-room [dungeon rect region-index]
   (reduce (fn [acc y]
                 (reduce (fn [acc x]
-                          (assoc-in acc [y x] (->Tile "." false "#FFFFFF")))
+                          (carve acc {:x x :y y} region-index))
                         acc
                         (range (:x1 rect) (:x2 rect))))
-              tiles
+              dungeon
               (range (:y1 rect) (:y2 rect))))
 
-(defn place-rooms [tiles]
+(defn place-rooms [dungeon]
   (loop [count 0
          rooms []
-         connecting-points []
-         tiles tiles]
+         region-index (inc (:region-index dungeon))
+         dungeon dungeon]
     (let [room (generate-random-room)
-          tiles (if (can-place-room? rooms room)
-                  (carve-room tiles room)
-                  tiles)]
+          can-place? (can-place-room? rooms room)
+          region-index (if can-place? (inc region-index) region-index)
+          dungeon (if can-place?
+                    (carve-room dungeon room region-index)
+                    dungeon)
+          tiles (:tiles dungeon)]
       (if (= count max-rooms)
-        ;[tiles rooms]
-        tiles
+        (-> dungeon
+            (assoc :tiles tiles)
+            (assoc :rooms rooms)
+            (assoc :region-index region-index))
         (recur (inc count)
-               (conj rooms room)
-               connecting-points
-               tiles)))))
+               (if can-place? (conj rooms room) rooms)
+               region-index
+               (assoc dungeon :tiles tiles))))))
 
 (defn add-pos [pos dir]
   {:x (+ (:x pos) (:x dir))
    :y (+ (:y pos) (:y dir))})
 
-(defn can-carve [tiles pos dir]
+(defn carve-dir [tiles pos dir]
   (let [{bounds-x :x bounds-y :y} (add-pos (add-pos (add-pos pos dir) dir) dir)
         {x :x y :y} (add-pos (add-pos pos dir) dir)]
     (if (and (> bounds-x 0)
@@ -84,42 +92,44 @@
       dir
       nil)))
 
-(defn carve [tiles {x :x y :y}]
-  (assoc-in tiles [y x] (->Tile "." false "#FF0000")))
-
-(defn grow-maze [tiles x y]
-  (loop [tiles (carve tiles {:x x :y y})
+(defn grow-maze [{:keys [region-index] :as dungeon} x y]
+  (loop [dungeon (carve dungeon {:x x :y y} region-index)
          cells [{:x x :y y}]]
     (if (empty? cells)
-      tiles
+      dungeon
       (let [cell (peek cells)
-            unmade-cell-dirs (into [] (remove #(nil? (can-carve tiles cell %)) cardinal-dirs))]
+            tiles (:tiles dungeon)
+            unmade-cell-dirs (into [] (remove #(nil? (carve-dir tiles cell %)) cardinal-dirs))]
         (if (empty? unmade-cell-dirs)
-          (recur tiles (pop cells))
+          (recur dungeon (pop cells))
           (let [dir (rand-nth unmade-cell-dirs)
                 next (add-pos cell dir)
                 next-2 (add-pos next dir)
-                tiles (-> tiles
-                          (carve next)
-                          (carve next-2))
+                dungeon (-> dungeon
+                            (carve next region-index)
+                            (carve next-2 region-index))
                 cells (conj cells next-2)]
-            (recur tiles cells)))))))
+            (recur dungeon cells)))))))
 
-(defn generate-maze [tiles]
-  (let [new-tiles (atom tiles)]
-    (doseq [row (range 1 (/ (count tiles) 2))
-            col (range 1 (/ (count (get tiles row)) 2))
-            :let [x (dec (* col 2))
-                  y (dec (* row 2))]]
-      (when (get-in @new-tiles [y x :blocks])
-        (swap! new-tiles grow-maze x y)))
-    @new-tiles))
+(defn generate-maze [{tiles :tiles :as dungeon}]
+  (let [range-x (filter odd? (range 1 map-width))
+        range-y (filter odd? (range 1 map-height))]
+    (reduce (fn [dungeon y]
+              (reduce (fn [dungeon x]
+                        (if (get-in dungeon [:tiles y x :blocks])
+                          (grow-maze (assoc dungeon :region-index (inc (:region-index dungeon)))
+                                     x y)
+                          dungeon))
+                      dungeon
+                      range-x))
+            dungeon
+            range-y)))
 
 (defn init-map [state]
-  (let [tiles (-> (all-walls map-width map-height)
-                  (place-rooms)
-                  (generate-maze))]
+  (let [dungeon (-> (hash-map :region-index -1 :region-vec [] :rooms [] :tiles (all-walls map-width map-height))
+                    (place-rooms)
+                    (generate-maze))]
     (-> state
-        (assoc :game-map (->GameMap tiles))
-        ;; (assoc :rooms rooms)
-        )))
+        (assoc :game-map (->GameMap (:tiles dungeon)))
+        (assoc :rooms (:rooms dungeon))
+        (assoc :region-index (:region-index dungeon)))))
