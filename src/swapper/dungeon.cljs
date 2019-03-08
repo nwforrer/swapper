@@ -168,11 +168,15 @@
 
 (defn connect-regions [dungeon]
   (loop [dungeon dungeon
+         attempts 0
          connectors (:connectors (get-connectors dungeon))
          connector-regions (get-connector-regions dungeon connectors)
          merged (reduce (fn [merged region] (assoc merged region region)) {} (range 0 (:region-index dungeon)))
          open-regions (range 0 (:region-index dungeon))]
-    (if (< (count open-regions) 2)
+
+    (if (or (< (count open-regions) 2)
+            (empty? connectors)
+            (> attempts 300))
       dungeon
       (let [connector (rand-nth connectors)
             regions (map #(get merged %) (get connector-regions connector))
@@ -198,6 +202,7 @@
                           (carve dungeon (rand-nth removing-connectors))
                           dungeon))]
           (recur dungeon
+                 (inc attempts)
                  connectors
                  connector-regions
                  merged
