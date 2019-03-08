@@ -33,7 +33,7 @@
   (vec (repeat height (vec (repeat width (->Tile "!" true "#777777"))))))
 
 (defn- generate-random-room []
-  (let [size (inc (* (inc (rand-int 10)) 2))
+  (let [size (inc (* (inc (rand-int 5)) 3))
         rectangularity (* (rand-int (+ 1 (int (/ size 2)))) 2)
         extend-width? (< (rand) 0.5)
         width (if extend-width? (+ size rectangularity) size)
@@ -43,10 +43,16 @@
         room (->Rect pos-x pos-y (+ pos-x width) (+ pos-y height))]
     room))
 
-(defn carve [dungeon {x :x y :y} region-index]
-  (as-> dungeon dungeon
-    (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333"))
-    (assoc-in dungeon [:region-vec {:x x :y y}] region-index)))
+(defn carve-debug [dungeon {x :x y :y}]
+  (assoc-in dungeon [:tiles y x] (->Tile "M" false "#FF0000")))
+
+(defn carve
+  ([dungeon {x :x y :y}]
+   (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333")))
+  ([dungeon {x :x y :y} region-index]
+   (as-> dungeon dungeon
+     (assoc-in dungeon [:tiles y x] (->Tile "." false "#333333"))
+     (assoc-in dungeon [:region-vec {:x x :y y}] region-index))))
 
 (defn- carve-room [dungeon rect region-index]
   (reduce (fn [acc y]
@@ -185,12 +191,17 @@
             connectors (filter (fn [pos]
                                  (> (count (set (map #(get merged %) (get connector-regions pos)))) 1))
                                connectors)]
-        ; TODO: random chance to open addition connector in removing-connectors
-        (recur (assoc-in dungeon [:tiles (:y connector) (:x connector)] (->Tile "." false "#333333"))
-               connectors
-               connector-regions
-               merged
-               open-regions)
+        (let [dungeon (as-> dungeon dungeon
+                        (carve dungeon connector)
+                        (if (and (< (rand-int 100) 20)
+                                 (not (empty? removing-connectors)))
+                          (carve dungeon (rand-nth removing-connectors))
+                          dungeon))]
+          (recur dungeon
+                 connectors
+                 connector-regions
+                 merged
+                 open-regions))
         ))))
 
 (defn get-exits [dungeon cell]
@@ -231,7 +242,4 @@
                     )]
     (-> state
         (assoc :game-map (->GameMap (:tiles dungeon)))
-        (assoc :region-vec (:region-vec dungeon))
-        (assoc :connectors (:connectors dungeon))
-        (assoc :dungeon dungeon)
         (assoc :rooms (:rooms dungeon)))))
