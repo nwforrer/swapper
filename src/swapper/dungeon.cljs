@@ -148,15 +148,53 @@
             dungeon
             range-y)))
 
-(defn connect-regions [dungeon]
-  (let [connectors (:connectors (get-connectors dungeon))]
-    (reduce (fn [dungeon {:keys [x y]}]
+(defn highlight-connectors [dungeon connectors]
+  (reduce (fn [dungeon {:keys [x y]}]
               (assoc-in dungeon [:tiles y x] (->Tile "!" true "#FF0000")))
             dungeon
-            connectors)))
+            connectors))
+
+(defn get-connector-regions [dungeon connectors]
+  (reduce (fn [connector-regions pos]
+            (assoc connector-regions pos (adjacent-different-regions dungeon pos)))
+          {}
+          connectors))
+
+(defn connect-regions [dungeon]
+  (loop [dungeon dungeon
+         connectors (:connectors (get-connectors dungeon))
+         connector-regions (get-connector-regions dungeon connectors)
+         merged (reduce (fn [merged region] (assoc merged region region)) {} (range 0 (:region-index dungeon)))
+         open-regions (range 0 (:region-index dungeon))]
+    (if (< (count open-regions) 2)
+      dungeon
+      (let [connector (rand-nth connectors)
+            regions (map #(get merged %) (get connector-regions connector))
+            dest (first regions)
+            sources (vec (rest regions))
+            merged (reduce (fn [merged region]
+                             (if (some #(= (get merged region) %) sources) 
+                               (assoc merged region dest)
+                               merged))
+                           merged
+                           (range 0 (:region-index dungeon)))
+            open-regions (remove (fn [region] (some #(= region %) sources)) open-regions)
+            connectors (filter (fn [pos]
+                                 (> (count (set (map #(get merged %) (get connector-regions pos)))) 1))
+                               connectors)]
+        (recur (assoc-in dungeon [:tiles (:y connector) (:x connector)] (->Tile "." false "#333333"))
+               connectors
+               connector-regions
+               merged
+               open-regions)
+        ))))
 
 (defn init-map [state]
-  (let [dungeon (-> (hash-map :connectors [] :region-index -1 :region-vec {} :rooms [] :tiles (all-walls map-width map-height))
+  (let [dungeon (-> (hash-map :connectors []
+                              :region-index -1
+                              :region-vec {}
+                              :rooms []
+                              :tiles (all-walls map-width map-height))
                     (place-rooms)
                     (generate-maze)
                     (connect-regions)
