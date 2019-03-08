@@ -30,7 +30,7 @@
     (= (count overlapping) 0)))
 
 (defn- all-walls [width height]
-  (vec (repeat height (vec (repeat width (->Tile "#" true "#777777"))))))
+  (vec (repeat height (vec (repeat width (->Tile "!" true "#777777"))))))
 
 (defn- generate-random-room []
   (let [size (inc (* (inc (rand-int 10)) 2))
@@ -179,15 +179,44 @@
                            merged
                            (range 0 (:region-index dungeon)))
             open-regions (remove (fn [region] (some #(= region %) sources)) open-regions)
+            removing-connectors (remove (fn [pos]
+                                          (> (count (set (map #(get merged %) (get connector-regions pos)))) 1))
+                                        connectors)
             connectors (filter (fn [pos]
                                  (> (count (set (map #(get merged %) (get connector-regions pos)))) 1))
                                connectors)]
+        ; TODO: random chance to open addition connector in removing-connectors
         (recur (assoc-in dungeon [:tiles (:y connector) (:x connector)] (->Tile "." false "#333333"))
                connectors
                connector-regions
                merged
                open-regions)
         ))))
+
+(defn get-exits [dungeon cell]
+  (remove #(get-in dungeon [:tiles (:y (add-pos cell %)) (:x (add-pos cell %)) :blocks])
+          cardinal-dirs))
+
+(defn remove-dead-ends [dungeon]
+  (let [done (atom true)]
+    (loop [dungeon dungeon]
+      (let [result (reduce (fn [dungeon y]
+                             (reduce (fn [dungeon x]
+                                       (let [cell (get-in dungeon [:tiles y x])]
+                                         (if (not (:blocks cell))
+                                           (if (= (count (get-exits dungeon {:x x :y y})) 1)
+                                             (do (reset! done false)
+                                                 (assoc-in dungeon [:tiles y x] (->Tile "!" true "#777777")))
+                                             dungeon)
+                                           dungeon)))
+                                     dungeon
+                                     (range 0 map-width)))
+                           dungeon
+                           (range 0 map-height))]
+        (if @done
+          result
+          (do (reset! done true)
+              (recur result)))))))
 
 (defn init-map [state]
   (let [dungeon (-> (hash-map :connectors []
@@ -198,6 +227,7 @@
                     (place-rooms)
                     (generate-maze)
                     (connect-regions)
+                    (remove-dead-ends)
                     )]
     (-> state
         (assoc :game-map (->GameMap (:tiles dungeon)))

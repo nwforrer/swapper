@@ -286,7 +286,7 @@
   (swap! *key-state* dissoc (.-keyCode event)))
 
 (defn click-event [event]
-  (println "clicked" ))
+  (println "clicked" (get-tile-pos-from-pixel (get-cursor-pos (get-in @*state* [:renderer :canvas]) event))))
 
 (defn update-game [state]
   (-> state
