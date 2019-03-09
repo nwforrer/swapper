@@ -12,7 +12,7 @@
 ;; {
 ;;   :entity-components
 ;;   :entity-component-types
-;;   :current-entity                ; entity that is currently taking it's turn
+;;   :current-entity                ; index of entity that is currently taking it's turn
 ;;   :renderer                      ; stores canvas and context for rendering
 ;;   :music                         ; stores Howler object for music
 ;;   :game-map                      ; stores the map tiles as a 2d vector in :tiles
@@ -99,11 +99,14 @@
     (assoc state :music sound)))
 
 (defn init-player [state]
-  (let [player (e/create-entity)]
+  (let [player (e/create-entity)
+        start-room (first (:rooms state))
+        start-x (+ (:x1 start-room) (/ (- (:x2 start-room) (:x1 start-room)) 2))
+        start-y (+ (:y1 start-room) (/ (- (:y2 start-room) (:y1 start-room)) 2))]
     (-> state
         (e/add-component player (->Controlled :normal))
         (e/add-component player (->LastActionTimer 100 0))
-        (e/add-component player (->Position 10 10))
+        (e/add-component player (->Position start-x start-y))
         (e/add-component player (->Health 3 3))
         (e/add-component player (->Speed 0 3))
         (e/add-component player (->AbilitiesState :none))
@@ -122,6 +125,22 @@
         (e/add-component enemy (->MeleeAttack 1))
         (e/add-component enemy (->AbilitiesToSteal [MeleeAttack]))
         (e/add-component enemy (->Visible char color color)))))
+
+(defn place-enemies [state]
+  (loop [index 1
+         state state]
+    (if (>= index (count (:rooms state)))
+      state
+      (recur
+       (inc index)
+       (let [room (nth (:rooms state) index)
+             x-diff (- (:x2 room) (:x1 room))
+             y-diff (- (:y2 room) (:y1 room))
+             start-x (+ (rand-int x-diff) (:x1 room))
+             start-y (+ (rand-int y-diff) (:y1 room))]
+         (if (< (rand) 0.3)
+           (init-enemy state "Goblin" 2 "g" "#0000FF" start-x start-y)
+           (init-enemy state "Kobold" 1 "k" "#00FF00" start-x start-y)))))))
 
 (defn clear-screen [state]
   (let [ctx (get-in state [:renderer :ctx])
@@ -322,9 +341,6 @@
         (reset! *input-queue* {})
         state))))
 
-(defn swap-input [state entity]
-  state)
-
 (defn keydown [event]
   (swap! *key-state* assoc (.-keyCode event) true)
   (swap! *input-queue* assoc (.-keyCode event) :down)
@@ -365,7 +381,7 @@
 
 (defn update-entities [state]
   (loop [state state
-         num-loops 1]
+         num-loops 0]
     (let [current-entity (:current-entity state)
           all-entities (e/get-all-entities state)
           entity (nth all-entities current-entity)
@@ -410,8 +426,7 @@
                    (init-sounds)
                    (init-map)
                    (init-player)
-                   (init-enemy "Kobold" 1 "k" "#00FF00" 7 7)
-                   (init-enemy "Goblin" 2 "g" "#0000FF" 11 13)
+                   (place-enemies)
                    (assoc :current-entity 0))
          canvas (get-in state [:renderer :canvas])]
     (game-loop state 0)
