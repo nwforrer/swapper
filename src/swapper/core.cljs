@@ -2,10 +2,23 @@
   (:require [brute.entity :as e]
             [cljsjs.howler]
             [cljs-time.core :as dt]
-            [cljs-time.coerce :as dtc]
-            [swapper.dungeon :as dungeon]))
+            [cljs-time.coerce :as dtc])
+  (:use [swapper.dungeon :only [init-map map-width map-height]]))
 
 (enable-console-print!)
+
+;;
+;; Entire state of game stored in the following structure:
+;; {
+;;   :entity-components
+;;   :entity-component-types
+;;   :renderer                      ; stores canvas and context for rendering
+;;   :music                         ; stores Howler object for music
+;;   :game-map                      ; stores the map tiles as a 2d vector in :tiles
+;;   :rooms                         ; a vector of Rects representing the generated rooms
+;;   :messages                      ; a vector of messages to be displayed
+;; }
+;;
 
 (defonce *state* (atom nil))
 (defonce *key-state* (atom nil))
@@ -13,6 +26,8 @@
 
 (defonce *tile-width* (atom nil))
 (def tile-height 14)
+
+(def max-messages 7)
 
 (defrecord Name [name])
 (defrecord Position [x y])
@@ -108,8 +123,8 @@
 
 (defn render-map [state]
   (let [ctx (get-in state [:renderer :ctx])]
-    (doseq [y (range dungeon/map-height)
-            x (range dungeon/map-width)]
+    (doseq [y (range map-height)
+            x (range map-width)]
       (let [tiles (get-in state [:game-map :tiles])
             tile (get-in tiles [y x])
             x-pos (* x @*tile-width*)
@@ -132,34 +147,54 @@
         (.fillText ctx (:char glyph) x y))))
   state)
 
+(defn render-messages [{:keys [messages] :as state}]
+  (let [left 40
+        top 650
+        ctx (get-in state [:renderer :ctx])]
+    (set! (.-fillStyle ctx) "#333333")
+    (doseq [[message index] (map vector messages (range))]
+      (.fillText ctx message left (+ top (* index tile-height)))))
+  state)
+
+(defn add-message [state message]
+  (let [state (assoc state :messages (into [] (conj (:messages state) message)))]
+    (if (> (count (:messages state)) max-messages)
+      (assoc state :messages (into [] (rest (:messages state))))
+      state)))
+
 (defn set-abilities-state [state entity new-state]
-  (println "set abilities state" new-state)
   (let [controlled (e/get-component state entity Controlled)]
-    (replace-component state entity AbilitiesState #(assoc % :state new-state))))
+    (-> state
+     (replace-component entity AbilitiesState #(assoc % :state new-state))
+     (add-message (str "set abilities state" new-state)))))
 
 (defn move-position [state entity delta]
   (let* [position (e/get-component state entity Position)
+         name (e/get-component state entity Name)
          x (:x position)
          y (:y position)]
-    (replace-component state entity Position
-                       (fn [position & args]
-                         (-> position (assoc :x (+ x (:x delta))) (assoc :y (+ y (:y delta))))))))
+    (-> state
+        (replace-component entity Position
+                           (fn [position & args]
+                             (-> position (assoc :x (+ x (:x delta))) (assoc :y (+ y (:y delta))))))
+        (add-message (str (:name name) " moved " delta)))))
 
 (defn attack [state attacker defender]
   (let [attacker-name (e/get-component state attacker Name)
         defender-name (e/get-component state defender Name)
         attack (e/get-component state attacker MeleeAttack)]
-    (println (:name attacker-name) "attacks" (:name defender-name) "for" (:damage attack) "damage")
     (as-> state state
       (replace-component state defender Health (fn [health] (assoc health :health
                                                                    (- (:health health) (:damage attack)))))
+      (add-message state (str (:name attacker-name) " attacks " (:name defender-name) " for " (:damage attack) " damage"))
         
       (let [defender-health (e/get-component state defender Health)]
         (cond
           (<= (:health defender-health) 0)
           (do
-            (println (:name defender-name) "has died.")
-            (e/kill-entity state defender))
+            (-> state
+                (e/kill-entity defender)
+                (add-message (str (:name defender-name) " has died"))))
           
           :else
           (do
@@ -286,14 +321,17 @@
   (swap! *key-state* dissoc (.-keyCode event)))
 
 (defn click-event [event]
-  (println "clicked" (get-tile-pos-from-pixel (get-cursor-pos (get-in @*state* [:renderer :canvas]) event))))
+  (let [cursor-pos (get-cursor-pos (get-in @*state* [:renderer :canvas]) event)
+        tile-pos (get-tile-pos-from-pixel cursor-pos)]
+    (println "clicked" cursor-pos "tile" tile-pos)))
 
 (defn update-game [state]
   (-> state
       (handle-input)
       (clear-screen)
       (render-map)
-      (render-entities)))
+      (render-entities)
+      (render-messages)))
 
 (defn game-loop [state timestamp]
   (as-> state state
@@ -306,7 +344,7 @@
                    (init-ecs)
                    (init-render-context)
                    (init-sounds)
-                   (dungeon/init-map)
+                   (init-map)
                    (init-player)
                    (init-enemy "Kobold" "k" "#00FF00" 7 7)
                    (init-enemy "Goblin" "g" "#0000FF" 11 13))

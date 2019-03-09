@@ -4,10 +4,10 @@
 (defrecord GameMap [tiles])
 (defrecord Rect [x1 y1 x2 y2])
 
-(def map-width 101)
-(def map-height 51)
+(def map-width 95)
+(def map-height 45)
 
-(def max-rooms 500)
+(def max-rooms 100)
 (def room-min-height 5)
 (def room-max-height 7)
 (def room-min-width 7)
@@ -30,7 +30,7 @@
     (= (count overlapping) 0)))
 
 (defn- all-walls [width height]
-  (vec (repeat height (vec (repeat width (->Tile "!" true "#777777"))))))
+  (vec (repeat height (vec (repeat width (->Tile "#" true "#777777"))))))
 
 (defn- generate-random-room []
   (let [size (inc (* (inc (rand-int 5)) 3))
@@ -38,8 +38,8 @@
         extend-width? (< (rand) 0.5)
         width (if extend-width? (+ size rectangularity) size)
         height (if extend-width? size (+ size rectangularity))
-        pos-x (inc (* (rand-int (/ (- map-width width) 2)) 2))
-        pos-y (inc (* (rand-int (/ (- map-height height) 2)) 2))
+        pos-x (inc (* (rand-int (/ (- map-width width 1) 2)) 2))
+        pos-y (inc (* (rand-int (/ (- map-height height 1) 2)) 2))
         room (->Rect pos-x pos-y (+ pos-x width) (+ pos-y height))]
     room))
 
@@ -222,7 +222,7 @@
                                          (if (not (:blocks cell))
                                            (if (= (count (get-exits dungeon {:x x :y y})) 1)
                                              (do (reset! done false)
-                                                 (assoc-in dungeon [:tiles y x] (->Tile "!" true "#777777")))
+                                                 (assoc-in dungeon [:tiles y x] (->Tile "#" true "#777777")))
                                              dungeon)
                                            dungeon)))
                                      dungeon
