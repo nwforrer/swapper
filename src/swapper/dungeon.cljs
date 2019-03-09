@@ -4,7 +4,7 @@
 (defrecord GameMap [tiles])
 (defrecord Rect [x1 y1 x2 y2])
 
-(def map-width 95)
+(def map-width 91)
 (def map-height 45)
 
 (def max-rooms 100)

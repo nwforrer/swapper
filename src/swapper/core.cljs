@@ -17,6 +17,7 @@
 ;;   :game-map                      ; stores the map tiles as a 2d vector in :tiles
 ;;   :rooms                         ; a vector of Rects representing the generated rooms
 ;;   :messages                      ; a vector of messages to be displayed
+;;   :entity-list                   ; a vector of entities to display in the ui
 ;; }
 ;;
 
@@ -147,11 +148,28 @@
         (.fillText ctx (:char glyph) x y))))
   state)
 
+(defn render-entity-list [state]
+  (let [ctx (get-in state [:renderer :ctx])
+        entities (e/get-all-entities-with-component state Name)]
+    (set! (.-fillStyle ctx) "#FFF")
+    (doseq [[entity index] (map vector entities (range))
+            :let [name (:name (e/get-component state entity Name))]]
+      (.fillText ctx name 840 (+ 200 (* index (+ tile-height 5))))))
+  state)
+
+(defn render-ability-status [state]
+  (let [ctx (get-in state [:renderer :ctx])
+        entity (first (e/get-all-entities-with-component state AbilitiesState))
+        abilities-state (e/get-component state entity AbilitiesState)]
+    (set! (.-fillStyle ctx) "#FFF")
+    (.fillText ctx (str "Swap state " (:state abilities-state)) 450 650))
+  state)
+
 (defn render-messages [{:keys [messages] :as state}]
   (let [left 40
         top 650
         ctx (get-in state [:renderer :ctx])]
-    (set! (.-fillStyle ctx) "#333333")
+    (set! (.-fillStyle ctx) "#FFF")
     (doseq [[message index] (map vector messages (range))]
       (.fillText ctx message left (+ top (* index tile-height)))))
   state)
@@ -331,7 +349,9 @@
       (clear-screen)
       (render-map)
       (render-entities)
-      (render-messages)))
+      (render-messages)
+      (render-entity-list)
+      (render-ability-status)))
 
 (defn game-loop [state timestamp]
   (as-> state state
