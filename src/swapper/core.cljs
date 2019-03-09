@@ -382,8 +382,8 @@
 (defn update-entities [state]
   (loop [state state
          num-loops 0]
-    (let [current-entity (:current-entity state)
-          all-entities (e/get-all-entities state)
+    (let [all-entities (e/get-all-entities state)
+          current-entity (mod (:current-entity state) (count all-entities))
           entity (nth all-entities current-entity)
           speed-component (e/get-component state entity Speed)]
       (if (>= num-loops (count all-entities))
@@ -413,11 +413,11 @@
       (render-entity-list)
       (render-ability-status)))
 
-(defn game-loop [state timestamp]
-  (as-> state state
+(defn game-loop [timestamp]
+  (as-> @*state* state
     (update-game state)
     (reset! *state* state)
-    (.requestAnimationFrame js/window #(game-loop state %))))
+    (.requestAnimationFrame js/window game-loop)))
 
 (defn startup []
   (let* [state (-> {}
@@ -429,7 +429,8 @@
                    (place-enemies)
                    (assoc :current-entity 0))
          canvas (get-in state [:renderer :canvas])]
-    (game-loop state 0)
+    (reset! *state* state)
+    (.requestAnimationFrame js/window game-loop)
     (.addEventListener canvas "click" click-event))
   (set! (.-onkeydown js/document) keydown)
   (set! (.-onkeyup js/document) keyup))
