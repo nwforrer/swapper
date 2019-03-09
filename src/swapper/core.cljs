@@ -31,11 +31,14 @@
 
 (def max-messages 7)
 
+(def energy-to-move 10)
+
 (defrecord Name [name])
 (defrecord Position [x y])
 (defrecord Visible [char base-color color])
 (defrecord Controlled [input-state])
 (defrecord LastActionTimer [delay last-time])
+(defrecord Speed [current-energy speed])
 (defrecord Health [health max-health])
 (defrecord AbilitiesState [state])
 (defrecord SwapAttack [])
@@ -102,18 +105,20 @@
         (e/add-component player (->LastActionTimer 100 0))
         (e/add-component player (->Position 10 10))
         (e/add-component player (->Health 3 3))
+        (e/add-component player (->Speed 0 3))
         (e/add-component player (->AbilitiesState :none))
         (e/add-component player (->Name "Player"))
         (e/add-component player (->Visible "@" "#FF0000" "#FF0000"))
         (e/add-component player (->SwapAttack)))))
 
-(defn init-enemy [state name char color x y]
+(defn init-enemy [state name speed char color x y]
   (let [enemy (e/create-entity)]
     (-> state
         (e/add-component enemy (->Position x y))
         (e/add-component enemy (->Name name))
         (e/add-component enemy (->BasicAI Controlled))
         (e/add-component enemy (->Health 2 2))
+        (e/add-component enemy (->Speed 0 speed))
         (e/add-component enemy (->MeleeAttack 1))
         (e/add-component enemy (->AbilitiesToSteal [MeleeAttack]))
         (e/add-component enemy (->Visible char color color)))))
@@ -348,21 +353,39 @@
       (not (nil? ai))
       (handle-ai state entity))))
 
+(defn update-energy [state entity speed-component]
+  (replace-component state entity Speed
+                     (fn [{:keys [current-energy speed] :as component}]
+                       (assoc component :current-energy (+ current-energy speed)))))
+
+(defn use-energy [state entity speed-component]
+  (replace-component state entity Speed
+                     (fn [{:keys [current-energy] :as component}]
+                       (assoc component :current-energy (- current-energy energy-to-move)))))
+
 (defn update-entities [state]
   (loop [state state
          num-loops 1]
     (let [current-entity (:current-entity state)
           all-entities (e/get-all-entities state)
-          entity (nth all-entities current-entity)]
+          entity (nth all-entities current-entity)
+          speed-component (e/get-component state entity Speed)]
       (if (>= num-loops (count all-entities))
         state
-        (let [result (entity-turn state entity)]
-          (if (nil? result)
-            state
-            (recur
-             (assoc result
-                    :current-entity (mod (inc current-entity) (count all-entities)))
-             (inc num-loops))))))))
+        (if (>= (:current-energy speed-component) energy-to-move)
+          (let [result (entity-turn state entity)]
+            (if (nil? result)
+              state
+              (recur
+               (-> result
+                   (use-energy entity speed-component)
+                   (assoc :current-entity (mod (inc current-entity) (count all-entities))))
+               (inc num-loops))))
+          (recur
+           (-> state
+               (update-energy entity speed-component)
+               (assoc :current-entity (mod (inc current-entity) (count all-entities))))
+           (inc num-loops)))))))
 
 (defn update-game [state]
   (-> state
@@ -387,8 +410,8 @@
                    (init-sounds)
                    (init-map)
                    (init-player)
-                   (init-enemy "Kobold" "k" "#00FF00" 7 7)
-                   (init-enemy "Goblin" "g" "#0000FF" 11 13)
+                   (init-enemy "Kobold" 1 "k" "#00FF00" 7 7)
+                   (init-enemy "Goblin" 2 "g" "#0000FF" 11 13)
                    (assoc :current-entity 0))
          canvas (get-in state [:renderer :canvas])]
     (game-loop state 0)
