@@ -12,6 +12,7 @@
 ;; {
 ;;   :entity-components
 ;;   :entity-component-types
+;;   :current-entity                ; entity that is currently taking it's turn
 ;;   :renderer                      ; stores canvas and context for rendering
 ;;   :music                         ; stores Howler object for music
 ;;   :game-map                      ; stores the map tiles as a 2d vector in :tiles
@@ -40,6 +41,7 @@
 (defrecord SwapAttack [])
 (defrecord MeleeAttack [damage])
 (defrecord AbilitiesToSteal [abilities])
+(defrecord BasicAI [target-component])
 
 (defn remove-component [system entity instance]
   (let [type (e/get-component-type instance)
@@ -110,6 +112,7 @@
     (-> state
         (e/add-component enemy (->Position x y))
         (e/add-component enemy (->Name name))
+        (e/add-component enemy (->BasicAI Controlled))
         (e/add-component enemy (->Health 2 2))
         (e/add-component enemy (->MeleeAttack 1))
         (e/add-component enemy (->AbilitiesToSteal [MeleeAttack]))
@@ -263,72 +266,59 @@
       state)))
 
 (defn process-input-queue-actions [state entity abilities-state]
-  (let [new-state (atom state)]
-    (cond
-      (= (get @*input-queue* 83) :down)
-      (reset! new-state
-              (if (= (:state abilities-state) :swap)
-                (set-abilities-state @new-state entity :none)
-                (set-abilities-state @new-state entity :swap)))
-      
-      (= (get @*input-queue* 37) :down)
-      (reset! new-state (move-or-attack @new-state entity {:x -1 :y 0}))
+  (let [state (cond
+                (= (get @*input-queue* 83) :down)
+                (if (= (:state abilities-state) :swap)
+                  (set-abilities-state state entity :none)
+                  (set-abilities-state state entity :swap))
+                
+                (= (get @*input-queue* 37) :down)
+                (move-or-attack state entity {:x -1 :y 0})
 
-      (= (get @*input-queue* 39) :down)
-      (reset! new-state (move-or-attack @new-state entity {:x 1 :y 0}))
+                (= (get @*input-queue* 39) :down)
+                (move-or-attack state entity {:x 1 :y 0})
 
-      (= (get @*input-queue* 40) :down)
-      (reset! new-state (move-or-attack @new-state entity {:x 0 :y 1}))
+                (= (get @*input-queue* 40) :down)
+                (move-or-attack state entity {:x 0 :y 1})
 
-      (= (get @*input-queue* 38) :down)
-      (reset! new-state (move-or-attack @new-state entity {:x 0 :y -1})))
-
-    @new-state))
+                (= (get @*input-queue* 38) :down)
+                (move-or-attack state entity {:x 0 :y -1}))]
+    
+    state))
 
 (defn default-input [state entity]
-  (let [new-state (atom state)]
-    (let [last-action-timer (e/get-component state entity LastActionTimer)
-          abilities-state (e/get-component state entity AbilitiesState)]
-      (when (>= (- (dtc/to-long (dt/now)) (:last-time last-action-timer)) (:delay last-action-timer))
-        (reset! new-state (replace-component state entity LastActionTimer
-                                             (fn [last-action-timer]
-                                               (assoc last-action-timer :last-time (dtc/to-long (dt/now))))))
-        (cond
-          (get @*key-state* 83)
-          (reset! new-state
-                  (if (= (:state abilities-state) :swap)
-                    (set-abilities-state @new-state entity :none)
-                    (set-abilities-state @new-state entity :swap)))
-          
-          (get @*key-state* 37)
-          (reset! new-state (move-or-attack @new-state entity {:x -1 :y 0}))
+  (let [last-action-timer (e/get-component state entity LastActionTimer)
+        abilities-state (e/get-component state entity AbilitiesState)]
+    (when (>= (- (dtc/to-long (dt/now)) (:last-time last-action-timer)) (:delay last-action-timer))
+      (let [state (as-> state state
+                    (replace-component state entity LastActionTimer
+                                       (fn [last-action-timer]
+                                         (assoc last-action-timer :last-time (dtc/to-long (dt/now)))))
+                    (cond
+                      (get @*key-state* 83)
+                      (if (= (:state abilities-state) :swap)
+                        (set-abilities-state state entity :none)
+                        (set-abilities-state state entity :swap))
+                      
+                      (get @*key-state* 37)
+                      (move-or-attack state entity {:x -1 :y 0})
 
-          (get @*key-state* 39)
-          (reset! new-state (move-or-attack @new-state entity {:x 1 :y 0}))
+                      (get @*key-state* 39)
+                      (move-or-attack state entity {:x 1 :y 0})
 
-          (get @*key-state* 40)
-          (reset! new-state (move-or-attack @new-state entity {:x 0 :y 1}))
+                      (get @*key-state* 40)
+                      (move-or-attack state entity {:x 0 :y 1})
 
-          (get @*key-state* 38)
-          (reset! new-state (move-or-attack @new-state entity {:x 0 :y -1}))
+                      (get @*key-state* 38)
+                      (move-or-attack state entity {:x 0 :y -1})
 
-          :else
-          (reset! new-state (process-input-queue-actions @new-state entity abilities-state)))
-        (reset! *input-queue* {})))
-    @new-state))
+                      (not (empty? @*input-queue*))
+                      (process-input-queue-actions state entity abilities-state)))]
+        (reset! *input-queue* {})
+        state))))
 
 (defn swap-input [state entity]
   state)
-
-(defn handle-input [state]
-  (let [new-state (atom state)]
-    (doseq [entity (e/get-all-entities-with-component state Controlled)]
-      (let [controlled (e/get-component state entity Controlled)]
-        (case (:input-state controlled)
-          :normal (reset! new-state (default-input state entity))
-
-          :swap (reset! new-state (swap-input state entity)))))
-    @new-state))
 
 (defn keydown [event]
   (swap! *key-state* assoc (.-keyCode event) true)
@@ -343,9 +333,40 @@
         tile-pos (get-tile-pos-from-pixel cursor-pos)]
     (println "clicked" cursor-pos "tile" tile-pos)))
 
+(defn handle-ai [state entity]
+  (let [name-component (e/get-component state entity Name)
+        name (:name name-component)]
+    (add-message state (str name " took a turn."))))
+
+(defn entity-turn [state entity]
+  (let [controlled (e/get-component state entity Controlled)
+        ai (e/get-component state entity BasicAI)]
+    (cond
+      (not (nil? controlled))
+      (default-input state entity)
+
+      (not (nil? ai))
+      (handle-ai state entity))))
+
+(defn update-entities [state]
+  (loop [state state
+         num-loops 1]
+    (let [current-entity (:current-entity state)
+          all-entities (e/get-all-entities state)
+          entity (nth all-entities current-entity)]
+      (if (>= num-loops (count all-entities))
+        state
+        (let [result (entity-turn state entity)]
+          (if (nil? result)
+            state
+            (recur
+             (assoc result
+                    :current-entity (mod (inc current-entity) (count all-entities)))
+             (inc num-loops))))))))
+
 (defn update-game [state]
   (-> state
-      (handle-input)
+      (update-entities)
       (clear-screen)
       (render-map)
       (render-entities)
@@ -367,7 +388,8 @@
                    (init-map)
                    (init-player)
                    (init-enemy "Kobold" "k" "#00FF00" 7 7)
-                   (init-enemy "Goblin" "g" "#0000FF" 11 13))
+                   (init-enemy "Goblin" "g" "#0000FF" 11 13)
+                   (assoc :current-entity 0))
          canvas (get-in state [:renderer :canvas])]
     (game-loop state 0)
     (.addEventListener canvas "click" click-event))
